@@ -43,104 +43,167 @@ func (b *Bot) Start() error {
 		return fmt.Errorf("error getting updates channel: %w", err)
 	}
 
-	log.Println("Начинаем обработку обновлений...") // <<<---  Важный лог при старте обработки
+	log.Println("Начинаем обработку обновлений...")
 
 	for update := range updates {
-		log.Println("Получено обновление:", update) // <<<---  Лог каждого обновления
+		log.Println("Получено обновление:", update)
 
-		if update.Message == nil { // Ignore non-message updates
-			log.Println("Обновление без сообщения, пропускаем") // <<<--- Лог если нет сообщения
-			continue
-		}
-		log.Println("Обновление содержит сообщение:", update.Message) // <<<--- Лог если есть сообщение
+		if update.Message != nil { // Handle messages
+			log.Println("Обновление содержит сообщение:", update.Message)
 
-		userID := int64(update.Message.From.ID)
-		b.db.CreateUserIfNotExist(userID) // Ensure user exists in DB
+			userID := int64(update.Message.From.ID)
+			b.db.CreateUserIfNotExist(userID) // Ensure user exists in DB
 
-		command := update.Message.Command()
-		text := update.Message.Text
+			command := update.Message.Command()
+			text := update.Message.Text
 
-		log.Printf("Команда: '%s', Текст: '%s'", command, text) // <<<--- Лог команды и текста
+			log.Printf("Команда: '%s', Текст: '%s'", command, text)
 
-		switch command {
-		case "start", "help":
-			log.Println("Команда: /start или /help") // <<<--- Лог обработки команды /start или /help
-			b.handleHelpCommand(update.Message)
-		case "addcredit":
-			log.Println("Команда: /addcredit") // <<<--- Лог обработки команды /addcredit
-			b.handleAddCreditCommand(update.Message)
-		case "mycredits":
-			log.Println("Команда: /mycredits") // <<<--- Лог обработки команды /mycredits
-			b.handleMyCreditsCommand(update.Message)
-		case "deletecredit":
-			log.Println("Команда: /deletecredit")       // <<<--- Лог обработки команды /deletecredit
-			b.handleDeleteCreditCommand(update.Message) // <--- Добавлено обработчик удаления кредита
-		default:
-			log.Println("Команда не распознана, проверяем состояние пользователя") // <<<--- Лог для default кейса
-			// Обработка ввода данных в процессе добавления кредита
-			if state, ok := b.state[userID]; ok {
-				log.Printf("Состояние пользователя %d найдено: %s, вызов handleInputData", userID, state) // Добавим лог
-				b.handleInputData(update.Message, state)
-			} else if !strings.HasPrefix(text, "/") { // Ignore non-command messages after command flow
-				log.Println("Состояние не найдено и это не команда, отправляем 'Неизвестная команда'") // <<<--- Лог если состояние не найдено и не команда
-				b.sendMessage(update.Message.Chat.ID, "Неизвестная команда. Используйте /help для списка команд.")
-			} else {
-				log.Println("Состояние не найдено, но это команда (начинается с /), игнорируем") // <<<--- Лог если состояние не найдено, но это команда
+			switch command {
+			case "start", "help":
+				log.Println("Команда: /start или /help")
+				b.handleHelpCommand(update.Message)
+			case "addcredit":
+				log.Println("Команда: /addcredit")
+				b.handleAddCreditCommand(update.Message)
+			case "mycredits":
+				log.Println("Команда: /mycredits")
+				b.handleMyCreditsCommand(update.Message)
+			case "deletecredit":
+				log.Println("Команда: /deletecredit")
+				b.handleDeleteCreditCommand(update.Message)
+			default:
+				// Check for button presses (text messages from reply keyboard)
+				switch text {
+				case "Добавить кредит":
+					log.Println("Кнопка: Добавить кредит")
+					b.handleAddCreditCommand(update.Message)
+				case "Мои кредиты":
+					log.Println("Кнопка: Мои кредиты")
+					b.handleMyCreditsCommand(update.Message)
+				case "Удалить кредит":
+					log.Println("Кнопка: Удалить кредит")
+					b.handleDeleteCreditCommand(update.Message)
+				case "Помощь":
+					log.Println("Кнопка: Помощь")
+					b.handleHelpCommand(update.Message)
+				default:
+					log.Println("Команда не распознана, проверяем состояние пользователя")
+					// Обработка ввода данных в процессе добавления кредита
+					if state, ok := b.state[userID]; ok {
+						log.Printf("Состояние пользователя %d найдено: %s, вызов handleInputData", userID, state)
+						b.handleInputData(update.Message, state)
+					} else if !strings.HasPrefix(text, "/") { // Ignore non-command messages after command flow
+						log.Println("Состояние не найдено и это не команда, отправляем 'Неизвестная команда'")
+
+					} else {
+						log.Println("Состояние не найдено, но это команда (начинается с /), игнорируем")
+					}
+				}
 			}
+		} else {
+			log.Println("Обновление без сообщения, пропускаем")
+			continue
 		}
 	}
 	return nil
 }
 
+// handleCallbackQuery больше не нужен, т.к. используем ReplyKeyboard
+
 func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 	helpText := `
 Привет! Я бот для учета твоих кредитов.
 
-Команды:
+Выберите действие:`
 
-/start или /help - Показать это сообщение.
-/addcredit - Добавить новый кредит.
-/mycredits - Показать список твоих кредитов.
-/deletecredit - Удалить кредит.
-`
-	b.sendMessage(message.Chat.ID, helpText)
+	// Create ReplyKeyboardMarkup
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("➕ Добавить кредит"),
+			tgbotapi.NewKeyboardButton("💶 Мои кредиты"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("➖ Удалить кредит"),
+			tgbotapi.NewKeyboardButton("🆘 Помощь"),
+		),
+	)
+	keyboard.ResizeKeyboard = true // Optional: make keyboard smaller
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, helpText)
+	msg.ReplyMarkup = keyboard
+	msg.ParseMode = tgbotapi.ModeMarkdown
+	_, err := b.botAPI.Send(msg)
+	if err != nil {
+		log.Printf("Error sending message with buttons: %v", err)
+	}
+	b.sendMessage(message.Chat.ID, helpText, message.MessageID) // Corrected sendMessage call
 }
 
+// Новая функция-обертка для handleAddCreditCommand, принимающая UserID как аргумент
+func (b *Bot) handleAddCreditCommandForCallback(message *tgbotapi.Message, userID int64) {
+	log.Printf("handleAddCreditCommandForCallback - UserID из callbackQuery.From.ID: %d", userID) // ЛОГ для новой функции
+	b.state[userID] = "waiting_bank_name"
+	b.inputData[userID] = make(map[string]string)
+	log.Printf("Состояние для пользователя %d установлено в: %s", userID, b.state[userID])
+
+	msgText := "Введите название банка:"
+	msg := tgbotapi.NewMessage(message.Chat.ID, msgText)
+
+	// Optionally add a cancel button if needed during input process - Inline Keyboard still possible if needed for cancel
+	/*cancelKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("Отмена", "cancel_addcredit"),
+		),
+	)
+	msg.ReplyMarkup = cancelKeyboard*/
+
+	_, err := b.botAPI.Send(msg)
+	if err != nil {
+		log.Printf("Error sending message: %v", err)
+	}
+}
+
+// handleAddCreditCommand теперь вызывается ТОЛЬКО при получении текстовой команды /addcredit
+// и использует message.From.ID как и раньше
 func (b *Bot) handleAddCreditCommand(message *tgbotapi.Message) {
 	userID := int64(message.From.ID)
+	log.Printf("handleAddCreditCommand (текстовая команда/кнопка) - UserID из message.From.ID: %d", userID) // ЛОГ для текстовой команды и кнопок
 	b.state[userID] = "waiting_bank_name"
-	b.inputData[userID] = make(map[string]string)                                          // Инициализация для нового ввода
-	log.Printf("Состояние для пользователя %d установлено в: %s", userID, b.state[userID]) // Добавим лог
-	b.sendMessage(message.Chat.ID, "Введите название банка:")
+	b.inputData[userID] = make(map[string]string)
+	log.Printf("Состояние для пользователя %d установлено в: %s", userID, b.state[userID])
+
+	msgText := "Введите название банка:"
+	b.sendMessage(message.Chat.ID, msgText, message.MessageID)
 }
 
 func (b *Bot) handleInputData(message *tgbotapi.Message, state string) {
 	userID := int64(message.From.ID)
 	text := message.Text
-	log.Printf("handleInputData вызвана для пользователя %d, состояние: %s, текст: %s", userID, state, text) // Добавим лог в начале
+	log.Printf("handleInputData вызвана для пользователя %d, состояние: %s, текст: %s", userID, state, text)
 
 	switch state {
 	case "waiting_bank_name":
 		b.inputData[userID]["bank_name"] = text
 		b.state[userID] = "waiting_loan_amount"
-		log.Printf("Состояние пользователя %d изменено на: %s, банк: %s", userID, b.state[userID], text) // Добавим лог
-		b.sendMessage(message.Chat.ID, "Введите сумму кредита:")
+		log.Printf("Состояние пользователя %d изменено на: %s, банк: %s", userID, b.state[userID], text)
+		b.sendMessage(message.Chat.ID, "Введите сумму кредита:", message.MessageID)
 
 	case "waiting_loan_amount":
 		_, err := strconv.ParseFloat(text, 64)
 		if err != nil {
-			b.sendMessage(message.Chat.ID, "Некорректная сумма. Введите число, например, 10000.50")
+			b.sendMessage(message.Chat.ID, "Некорректная сумма. Введите число, например, 10000.50", message.MessageID)
 			return
 		}
 		b.inputData[userID]["loan_amount"] = text
 		b.state[userID] = "waiting_due_date"
-		log.Printf("Состояние пользователя %d изменено на: %s, сумма: %s", userID, b.state[userID], text) // Добавим лог
-		b.sendMessage(message.Chat.ID, "Введите дату платежа в формате ГГГГ-ММ-ДД (например, 2024-12-31):")
+		log.Printf("Состояние пользователя %d изменено на: %s, сумма: %s", userID, b.state[userID], text)
+		b.sendMessage(message.Chat.ID, "Введите дату платежа в формате ГГГГ-ММ-ДД (например, 2024-12-31):", message.MessageID)
 
 	case "waiting_due_date":
 		_, err := time.Parse("2006-01-02", text)
 		if err != nil {
-			b.sendMessage(message.Chat.ID, "Некорректный формат даты. Используйте ГГГГ-ММ-ДД (например, 2024-12-31)")
+			b.sendMessage(message.Chat.ID, "Некорректный формат даты. Используйте ГГГГ-ММ-ДД (например, 2024-12-31)", message.MessageID)
 			return
 		}
 		b.inputData[userID]["due_date"] = text
@@ -155,26 +218,26 @@ func (b *Bot) handleInputData(message *tgbotapi.Message, state string) {
 		err = b.db.AddCredit(credit)
 		if err != nil {
 			log.Printf("Error adding credit to DB: %v", err)
-			b.sendMessage(message.Chat.ID, "Ошибка при сохранении кредита. Попробуйте еще раз.")
+			b.sendMessage(message.Chat.ID, "Ошибка при сохранении кредита. Попробуйте еще раз.", message.MessageID)
 		} else {
-			b.sendMessage(message.Chat.ID, "Кредит успешно добавлен!")
+			b.sendMessage(message.Chat.ID, "Кредит успешно добавлен!", message.MessageID)
 		}
 
 		delete(b.state, userID)
 		delete(b.inputData, userID)
-		log.Printf("Состояние и данные пользователя %d сброшены", userID) // Добавим лог
+		log.Printf("Состояние и данные пользователя %d сброшены", userID)
 
 	case "waiting_credit_to_delete": // <--- Обработка выбора кредита для удаления
 		creditIndex, err := strconv.Atoi(text)
 		if err != nil {
-			b.sendMessage(message.Chat.ID, "Пожалуйста, введите номер кредита для удаления.")
+			b.sendMessage(message.Chat.ID, "Пожалуйста, введите номер кредита для удаления.", message.MessageID)
 			return
 		}
 
 		creditsToDelete, ok := b.inputData[userID]["credits_to_delete"]
 		if !ok {
 			log.Printf("Error: credits_to_delete data not found for user %d", userID)
-			b.sendMessage(message.Chat.ID, "Произошла ошибка, попробуйте еще раз.")
+			b.sendMessage(message.Chat.ID, "Произошла ошибка, попробуйте еще раз.", message.MessageID)
 			delete(b.state, userID)
 			delete(b.inputData, userID)
 			return
@@ -182,14 +245,14 @@ func (b *Bot) handleInputData(message *tgbotapi.Message, state string) {
 
 		creditIDs := strings.Split(creditsToDelete, ",") // Assuming IDs are stored as comma-separated string
 		if creditIndex <= 0 || creditIndex > len(creditIDs) {
-			b.sendMessage(message.Chat.ID, "Неверный номер кредита. Пожалуйста, выберите номер из списка.")
+			b.sendMessage(message.Chat.ID, "Неверный номер кредита. Пожалуйста, выберите номер из списка.", message.MessageID)
 			return
 		}
 
 		creditIDToDelete, err := strconv.Atoi(creditIDs[creditIndex-1]) // Get the correct credit ID
 		if err != nil {
 			log.Printf("Error converting credit ID to int: %v", err)
-			b.sendMessage(message.Chat.ID, "Произошла ошибка, попробуйте еще раз.")
+			b.sendMessage(message.Chat.ID, "Произошла ошибка, попробуйте еще раз.", message.MessageID)
 			delete(b.state, userID)
 			delete(b.inputData, userID)
 			return
@@ -198,28 +261,29 @@ func (b *Bot) handleInputData(message *tgbotapi.Message, state string) {
 		err = b.db.DeleteCredit(creditIDToDelete) // <--- Вызов функции удаления из БД
 		if err != nil {
 			log.Printf("Error deleting credit from DB: %v", err)
-			b.sendMessage(message.Chat.ID, "Ошибка при удалении кредита. Попробуйте еще раз.")
+			b.sendMessage(message.Chat.ID, "Ошибка при удалении кредита. Попробуйте еще раз.", message.MessageID)
 		} else {
-			b.sendMessage(message.Chat.ID, "Кредит успешно удален!")
+			b.sendMessage(message.Chat.ID, "Кредит успешно удален!", message.MessageID)
 		}
 
 		delete(b.state, userID)
 		delete(b.inputData, userID)
-		log.Printf("Состояние и данные пользователя %d сброшены после удаления кредита", userID) // Добавим лог
+		log.Printf("Состояние и данные пользователя %d сброшены после удаления кредита", userID)
 	}
 }
 
-func (b *Bot) handleMyCreditsCommand(message *tgbotapi.Message) {
-	userID := int64(message.From.ID)
-	credits, err := b.db.GetCreditsByUser(userID)
+// НОВАЯ функция-обертка для handleMyCreditsCommand, вызываемая из CallbackQuery
+func (b *Bot) handleMyCreditsCommandForCallback(message *tgbotapi.Message, userID int64) {
+	log.Printf("handleMyCreditsCommandForCallback - UserID из callbackQuery.From.ID: %d", userID) // ЛОГ
+	credits, err := b.db.GetCreditsByUser(userID)                                                 // <-- ИСПОЛЬЗУЕМ ПЕРЕДАННЫЙ userID
 	if err != nil {
-		log.Printf("Error getting credits from DB: %v", err)
-		b.sendMessage(message.Chat.ID, "Ошибка при получении списка кредитов.")
+		log.Printf("handleMyCreditsCommandForCallback: Ошибка при получении кредитов из DB: %v", err)
+		b.sendMessage(message.Chat.ID, "Ошибка при получении списка кредитов.", message.MessageID)
 		return
 	}
 
 	if len(credits) == 0 {
-		b.sendMessage(message.Chat.ID, "У вас пока нет добавленных кредитов. Используйте /addcredit чтобы добавить.")
+		b.sendMessage(message.Chat.ID, "У вас пока нет добавленных кредитов. Используйте /addcredit чтобы добавить.", message.MessageID)
 		return
 	}
 
@@ -231,20 +295,49 @@ func (b *Bot) handleMyCreditsCommand(message *tgbotapi.Message) {
 		formattedCredits += "---\n"
 	}
 
-	b.sendMessage(message.Chat.ID, formattedCredits)
+	b.sendMessage(message.Chat.ID, formattedCredits, message.MessageID)
+
 }
 
-func (b *Bot) handleDeleteCreditCommand(message *tgbotapi.Message) {
-	userID := int64(message.From.ID)
+// handleMyCreditsCommand теперь вызывается ТОЛЬКО при получении текстовой команды /mycredits
+func (b *Bot) handleMyCreditsCommand(message *tgbotapi.Message) {
+	userID := int64(message.From.ID)                                                                 // <-- UserID из message.From.ID для текстовой команды
+	log.Printf("handleMyCreditsCommand (текстовая команда) - UserID из message.From.ID: %d", userID) // ЛОГ
 	credits, err := b.db.GetCreditsByUser(userID)
 	if err != nil {
-		log.Printf("Error getting credits from DB: %v", err)
-		b.sendMessage(message.Chat.ID, "Ошибка при получении списка кредитов для удаления.")
+		log.Printf("handleMyCreditsCommand (текстовая команда): Ошибка при получении кредитов из DB: %v", err)
+		b.sendMessage(message.Chat.ID, "Ошибка при получении списка кредитов.", message.MessageID)
 		return
 	}
 
 	if len(credits) == 0 {
-		b.sendMessage(message.Chat.ID, "У вас нет кредитов для удаления. Используйте /addcredit чтобы добавить.")
+		b.sendMessage(message.Chat.ID, "У вас пока нет добавленных кредитов. Используйте /addcredit чтобы добавить.", message.MessageID)
+		return
+	}
+
+	formattedCredits := "*Ваши кредиты:*\n\n"
+	for _, credit := range credits {
+		formattedCredits += fmt.Sprintf("🏦 *Банк:* %s\n", credit.BankName)
+		formattedCredits += fmt.Sprintf("💰 *Сумма кредита:* %.2f ₽\n ", credit.LoanAmount)
+		formattedCredits += fmt.Sprintf("📅 *Дата платежа:* %s\n", credit.DueDate.Format("02.01.2006"))
+		formattedCredits += "---\n"
+	}
+
+	b.sendMessage(message.Chat.ID, formattedCredits, message.MessageID)
+}
+
+// Новая функция-обертка для handleDeleteCreditCommand, вызываемая из CallbackQuery
+func (b *Bot) handleDeleteCreditCommandForCallback(message *tgbotapi.Message, userID int64) {
+	log.Printf("handleDeleteCreditCommandForCallback - UserID из callbackQuery.From.ID: %d", userID) // ЛОГ
+	credits, err := b.db.GetCreditsByUser(userID)
+	if err != nil {
+		log.Printf("handleDeleteCreditCommandForCallback: Ошибка при получении кредитов из DB: %v", err)
+		b.sendMessage(message.Chat.ID, "Ошибка при получении списка кредитов для удаления.", message.MessageID)
+		return
+	}
+
+	if len(credits) == 0 {
+		b.sendMessage(message.Chat.ID, "У вас нет кредитов для удаления. Используйте /addcredit чтобы добавить.", message.MessageID)
 		return
 	}
 
@@ -255,10 +348,33 @@ func (b *Bot) handleDeleteCreditCommand(message *tgbotapi.Message) {
 		creditIDs = append(creditIDs, strconv.Itoa(credit.ID)) // Store credit IDs as strings
 	}
 
-	b.inputData[userID] = make(map[string]string)
-	b.inputData[userID]["credits_to_delete"] = strings.Join(creditIDs, ",") // Store comma-separated IDs
-	b.state[userID] = "waiting_credit_to_delete"
-	b.sendMessage(message.Chat.ID, formattedCredits)
+	b.sendMessage(message.Chat.ID, formattedCredits, message.MessageID)
+}
+
+// handleDeleteCreditCommand теперь вызывается ТОЛЬКО при получении текстовой команды /deletecredit
+func (b *Bot) handleDeleteCreditCommand(message *tgbotapi.Message) {
+	userID := int64(message.From.ID)
+	log.Printf("handleDeleteCreditCommand (текстовая команда) - UserID из message.From.ID: %d", userID) // ЛОГ
+	credits, err := b.db.GetCreditsByUser(userID)
+	if err != nil {
+		log.Printf("handleDeleteCreditCommand (текстовая команда): Ошибка при получении кредитов из DB: %v", err)
+		b.sendMessage(message.Chat.ID, "Ошибка при получении списка кредитов для удаления.", message.MessageID)
+		return
+	}
+
+	if len(credits) == 0 {
+		b.sendMessage(message.Chat.ID, "У вас нет кредитов для удаления. Используйте /addcredit чтобы добавить.", message.MessageID)
+		return
+	}
+
+	formattedCredits := "Выберите номер кредита для удаления:\n\n"
+	var creditIDs []string // To store credit IDs for later deletion
+	for i, credit := range credits {
+		formattedCredits += fmt.Sprintf("%d. 🏦 *Банк:* %s, 💰 *Сумма кредита:* %.2f ₽, 📅 *Дата платежа:* %s\n", i+1, credit.BankName, credit.LoanAmount, credit.DueDate.Format("02.01.2006"))
+		creditIDs = append(creditIDs, strconv.Itoa(credit.ID)) // Store credit IDs as strings
+	}
+
+	b.sendMessage(message.Chat.ID, formattedCredits, message.MessageID)
 }
 
 func (b *Bot) SendNotifications() {
@@ -277,13 +393,17 @@ func (b *Bot) SendNotifications() {
 
 		notificationText := fmt.Sprintf("🔔 *Напоминание о платеже по кредиту!*\n\nБанк: %s\nСумма: %.2f\nДата платежа: %s\n\nНе забудьте оплатить кредит завтра!",
 			credit.BankName, credit.LoanAmount, credit.DueDate.Format("02.01.2006"))
-		b.sendMessage(user.ID, notificationText)
+		b.sendMessage(user.ID, notificationText, 0) // No reply for notifications
 	}
 }
 
-func (b *Bot) sendMessage(chatID int64, text string) {
+// Modified sendMessage function to accept replyToMessageID
+func (b *Bot) sendMessage(chatID int64, text string, replyToMessageID int) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeMarkdown // Включаем Markdown для форматирования
+	if replyToMessageID != 0 {
+		msg.ReplyToMessageID = replyToMessageID // Set reply to message ID if provided
+	}
 	_, err := b.botAPI.Send(msg)
 	if err != nil {
 		log.Printf("Error sending message: %v", err)

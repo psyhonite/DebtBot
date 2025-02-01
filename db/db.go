@@ -85,10 +85,13 @@ func (d *DB) AddCredit(credit *models.Credit) error {
 // Получение кредитов пользователя
 func (d *DB) GetCreditsByUser(userID int64) ([]*models.Credit, error) {
 	credits := []*models.Credit{}
-	err := d.Select(&credits, "SELECT * FROM credits WHERE user_id = ? ORDER BY due_date ASC", userID) // Используем ? для параметров в SQLite
+	log.Printf("DB.GetCreditsByUser: Запрос кредитов для userID: %d", userID) // <--- Добавили лог
+	err := d.Select(&credits, "SELECT * FROM credits WHERE user_id = ? ORDER BY due_date ASC", userID)
 	if err != nil {
+		log.Printf("DB.GetCreditsByUser: Ошибка при выполнении запроса: %v", err) // <--- Добавили лог ошибки
 		return nil, err
 	}
+	log.Printf("DB.GetCreditsByUser: Найдено кредитов: %d", len(credits)) // <--- Добавили лог количества найденных кредитов
 	return credits, nil
 }
 
